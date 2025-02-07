@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+require 'bundler'
+Bundler.require
+require_relative '../lib/tachi'
+
+app = Tachi::Application.new
+app.main ARGV.dup
+
