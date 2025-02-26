@@ -3,13 +3,61 @@ require_relative 'config'
 
 module Tachi
   class Application
+    VERSION = "0.3.0".freeze
+
     def initialize
       @config_filename = File.join(Dir.home(), ".tachi/config")
       @context_name = nil
       @env = {}
     end
 
-    def show_commands(commands)
+    def with_command_env(cmd)
+      Dir.chdir cmd[:dirname] do
+        env =
+          {}
+          .merge(@context.resolve_env(wd: cmd[:dirname]))
+          .merge(get_environment_for_path(cmd[:dirname]))
+
+        yield env, cmd
+      end
+    end
+
+    def execute_command(cmd)
+      with_command_env(cmd) do |env, _cmd|
+        puts cmd[:command]
+        result = system env, cmd[:path], *command_args
+        result
+      end
+    end
+
+    def describe_command(cmd)
+      with_command_env(cmd) do |env, _cmd|
+        puts "Command #{cmd[:command]}",
+          "\tPATH: #{cmd[:path]}",
+          "\tENV:",
+          *(env.map do |(key, value)|
+            "\t\t#{key}=#{value}"
+          end)
+      end
+    end
+
+    def describe_commands(commands)
+      commands.each do |cmd|
+        describe_command(cmd)
+      end
+    end
+
+    def view_command(cmd)
+      puts File.read(cmd[:path])
+    end
+
+    def view_commands(commands)
+      commands.each do |cmd|
+        view_command(cmd)
+      end
+    end
+
+    def list_commands(commands)
       commands_list =
         commands.map do |row|
           "\t* " + row[:command]
@@ -23,7 +71,7 @@ module Tachi
 
     def show_help
       puts "HELP"
-      show_commands(@commands)
+      list_commands(@commands)
     end
 
     def scan_for_commands
@@ -137,6 +185,7 @@ module Tachi
 
     def process_argv(argv)
       parser = OptionParser.new do |opts|
+        opts.banner = "Tachi v#{VERSION} the useful sidearm"
         opts.on '-c', '--config-file FILENAME', String, "The configuration file that should be pulled. (default. #{@config_filename})" do |value|
           @config_filename = value
         end
@@ -159,39 +208,54 @@ module Tachi
           show_help
         in ["help"]
           show_help
+        in ["describe"]
+          show_help
+          abort
+        in ["view", segment]
+          cmds = find_commands(segment)
+          view_commands(cmds)
+        in ["describe", segment]
+          cmds = find_commands(segment)
+          describe_commands(cmds)
         in ["find", segment]
           cmds = find_commands(segment)
-          show_commands(cmds)
+          list_commands(cmds)
         in ["env"]
           puts YAML.dump(@context.resolve_env(wd: Dir.pwd))
+        in ["run"]
+          show_help
+          abort
         in ["run", command, *command_args]
           cmds = find_commands(command)
 
           if cmds.empty?
+            warn "Command pattern unmatched: #{command}"
             show_help
+            abort
           else
-            counts = {
-              total: 0,
-              success: 0,
-              failure: 0,
-            }
+            successful_commands = []
+            failed_commands = []
 
             cmds.each do |cmd|
-              counts[:total] += 1
-              Dir.chdir cmd[:dirname] do
-                env =
-                  {}
-                  .merge(@context.resolve_env(wd: cmd[:dirname]))
-                  .merge(get_environment_for_path(cmd[:dirname]))
+              result = execute_command(cmd)
 
-                puts cmd[:command]
-                result = system env, cmd[:path], *command_args
-                counts[result ? :success : :failure] += 1
+              if result
+                successful_commands << cmd
+              else
+                failed_commands << cmd
               end
             end
 
-            puts "Completed #{counts[:success]}/#{counts[:total]}"
+            total_commands = cmd.size
+            puts "Completed #{successful_commands.size}/#{failed_commands.size}/#{total_commands}"
           end
+
+        in ["version"]
+          puts "Tachi v#{VERSION}"
+
+        else
+          show_help
+          abort
       end
     end
   end
