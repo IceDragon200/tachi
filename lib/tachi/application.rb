@@ -22,7 +22,7 @@ module Tachi
       end
     end
 
-    def execute_command(cmd)
+    def execute_command(cmd, command_args)
       with_command_env(cmd) do |env, _cmd|
         puts cmd[:command]
         result = system env, cmd[:path], *command_args
@@ -237,7 +237,7 @@ module Tachi
             failed_commands = []
 
             cmds.each do |cmd|
-              result = execute_command(cmd)
+              result = execute_command(cmd, command_args)
 
               if result
                 successful_commands << cmd
@@ -246,7 +246,7 @@ module Tachi
               end
             end
 
-            total_commands = cmd.size
+            total_commands = cmds.size
             puts "Completed #{successful_commands.size}/#{failed_commands.size}/#{total_commands}"
           end
 
