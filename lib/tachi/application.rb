@@ -3,7 +3,7 @@ require_relative 'config'
 
 module Tachi
   class Application
-    VERSION = "0.3.0".freeze
+    VERSION = "0.4.0".freeze
 
     def initialize
       @config_filename = File.join(Dir.home(), ".tachi/config")
@@ -22,7 +22,7 @@ module Tachi
       end
     end
 
-    def execute_command(cmd)
+    def execute_command(cmd, command_args)
       with_command_env(cmd) do |env, _cmd|
         puts cmd[:command]
         result = system env, cmd[:path], *command_args
@@ -134,9 +134,12 @@ module Tachi
     end
 
     def find_commands(command)
-      command_segments = command.split(".")
+      wanted_commands = split_command(command)
       @commands.filter do |row|
-        match_command_segments?(row[:command].split("."), command_segments)
+        wanted_commands.any? do |command_segments|
+          command, = *split_command(row[:command])
+          match_command_segments?(command, command_segments)
+        end
       end
     end
 
@@ -237,7 +240,7 @@ module Tachi
             failed_commands = []
 
             cmds.each do |cmd|
-              result = execute_command(cmd)
+              result = execute_command(cmd, command_args)
 
               if result
                 successful_commands << cmd
@@ -246,7 +249,7 @@ module Tachi
               end
             end
 
-            total_commands = cmd.size
+            total_commands = cmds.size
             puts "Completed #{successful_commands.size}/#{failed_commands.size}/#{total_commands}"
           end
 
@@ -257,6 +260,45 @@ module Tachi
           show_help
           abort
       end
+    end
+
+    # @args command [String]
+    # @returns Array<Array<String>>
+    def split_command(command)
+      result = []
+      segments = command.split(".")
+      segments.each do |segment|
+        case segment
+        when /\A\{(.+)\}\z/
+          sub_segments = $1.split(",")
+          if result.empty?
+            sub_segments.each do |sub_segment|
+              result.push([sub_segment])
+            end
+          else
+            old_result = result
+            result = []
+            old_result.each do |base_segments|
+              sub_segments.each do |sub_segment|
+                new_base_segments = base_segments.dup()
+                new_base_segments.push(sub_segment)
+                result.push(new_base_segments)
+              end
+            end
+          end
+        when String
+          if result.empty?
+            result.push([segment])
+          else
+            result.each do |base_segments|
+              base_segments.push(segment)
+            end
+          end
+        else
+          raise "unexpected command segment: #{segment.inspect}"
+        end
+      end
+      result
     end
   end
 end
