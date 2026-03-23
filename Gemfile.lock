@@ -1,7 +1,8 @@
 GEM
   remote: https://rubygems.org/
   specs:
-    optparse (0.6.0)
+    json (2.19.2)
+    optparse (0.8.1)
     yaml (0.4.0)
 
 PLATFORMS
@@ -9,8 +10,9 @@ PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
+  json
   optparse
   yaml
 
 BUNDLED WITH
-   2.5.23
+  4.0.3
