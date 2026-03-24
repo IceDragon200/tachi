@@ -97,9 +97,9 @@ module Tachi
           end
         end
       end.map do |filename|
-        basename = File.basename(filename, File.extname(filename))
-
+        basename = File.basename(filename)
         _,command = *basename.split("cmd.")
+        command = File.basename(command, File.extname(command))
         dirname = File.dirname(filename)
 
         command =

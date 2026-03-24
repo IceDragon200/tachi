@@ -2,7 +2,7 @@
 
 The concurrency update, adds additional options for concurrency handling as well as support for custom file extension that should be treated as commands.
 
-* Added `Config#allowed_extensions` which defaults to `["", "sh", "rb", "pl", "py"]`.
+* Added `Config#allowed_extensions` which defaults to `["", ".sh", ".rb", ".pl", ".py"]`.
   * `""` is a special case which allows extension-less commands
 * Improved `environment` file format and handling
   * `#` is now supported for comments

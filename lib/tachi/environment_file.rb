@@ -30,7 +30,9 @@ module Tachi
 
           key = key.strip
           value = value.strip
-          unless key.empty?
+          if key.empty?
+            raise InvalidEnvironmentVariableError, "key cannot be empty: #{filename}:#{line_no+1}"
+          else
             result[key] = value
           end
         end

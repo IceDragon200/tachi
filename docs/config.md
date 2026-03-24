@@ -22,7 +22,7 @@ contexts:
   - .py
   # Fixed environment variables that act as a base for ALL commands in the root path
   env:
-  - MY_ENV: my_value_for_ENV
+    MY_ENV: my_value_for_ENV
   # Calculated or evaluated environment variables, Tachi will replace:
   # * `ROOT_PATH` - the root_path of the context itself
   # * `WD` - the working directory of the command being executed

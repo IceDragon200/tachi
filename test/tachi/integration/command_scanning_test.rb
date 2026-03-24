@@ -46,6 +46,15 @@ class ApplicationCommandScanningTest < Minitest::Test
     )
   end
 
+  def test_scan_supports_extensionless_commands
+    write_command("apps/demo/cmd.plain")
+
+    commands = @app.scan_for_commands
+    names = commands.map { |row| row[:command] }
+
+    assert_includes names, "apps.demo.plain"
+  end
+
   private
 
   def write_command(relative_path)

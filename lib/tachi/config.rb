@@ -28,7 +28,8 @@ module Tachi
         result = {}
         result.merge!(@env)
         @calc_env.each do |(key, value)|
-          result[key] = value.gsub(/\$\{(\w+)\}/) do |value|
+          # treat nil values as empty strings
+          result[key] = (value || "").gsub(/\$\{(\w+)\}/) do |value|
             case $1
             when "ROOT_PATH"
               @root_path
@@ -49,6 +50,34 @@ module Tachi
 
         unless @root_path
           fail "Context must have a root path"
+        end
+
+        case @env
+        when Hash
+          @env.each do |key, _value|
+            unless key.is_a?(String)
+              fail "key must be a string in env"
+            end
+            if key.empty?
+              fail "key cannot be empty in env"
+            end
+          end
+        else
+          fail "env must be an object/hash of KEY=VALUE pairs"
+        end
+
+        case @calc_env
+        when Hash
+          @calc_env.each do |key, _value|
+            unless key.is_a?(String)
+              fail "key must be a string in calc_env"
+            end
+            if key.empty?
+              fail "key cannot be empty in calc_env"
+            end
+          end
+        else
+          fail "calc_env must be an object/hash of KEY=VALUE pairs"
         end
 
         case @allowed_extensions
