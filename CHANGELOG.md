@@ -14,6 +14,7 @@ The concurrency update, adds additional options for concurrency handling as well
 * Added `-j N` and `--jobs N` flag, controls the number of threads used for parallel execution
 * Added `--max-buffer-size N` and `--buffer-size N` to control IO buffering, these don't normally need to be fiddled with but are provided since they were used for testing
 * Added some tests for new features and ensure regressions are being accounted for
+* Added `EXEC_PATH` environment variable which tracks the original working directory where tachi was executed in the `tachi` shim.
 
 # 0.4.0
 
