@@ -15,14 +15,19 @@ module Tachi
       @job_runner = Tachi::JobRunner.new
       @context_name = nil
       @env = {}
+      ["EXEC_PATH"].each do |key|
+        if ENV.key?(key)
+          @env[key] = ENV[key].dup
+        end
+      end
     end
 
-    def build_command_env(cmd)
-      env =
-        {}
-        .merge!(get_environment_for_path(cmd[:dirname]))
-        .merge!(@context.resolve_env(wd: cmd[:dirname]))
-
+    def build_command_env(cmd, unsafe: false)
+      env = {}.merge!(@env)
+      unless unsafe
+        env.merge!(get_environment_for_path(cmd[:dirname]))
+      end
+      env.merge!(@context.resolve_env(wd: cmd[:dirname]))
       env
     end
 
@@ -240,7 +245,7 @@ module Tachi
           cmds = find_commands(segment)
           list_commands(cmds)
         in ["env"]
-          puts YAML.dump(@context.resolve_env(wd: Dir.pwd))
+          puts Psych.dump(build_command_env({dirname: Dir.pwd}, unsafe: true))
         in ["run"]
           show_help
           abort
