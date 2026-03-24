@@ -1,44 +1,49 @@
 require 'optparse'
 require_relative 'config'
+require_relative 'job_runner'
+require_relative 'command_utils'
+require_relative 'environment_file'
 
 module Tachi
   class Application
-    VERSION = "0.4.0".freeze
+    VERSION = "0.5.0".freeze
+
+    include Tachi::CommandUtils
 
     def initialize
       @config_filename = File.join(Dir.home(), ".tachi/config")
+      @job_runner = Tachi::JobRunner.new
       @context_name = nil
       @env = {}
     end
 
-    def with_command_env(cmd)
-      Dir.chdir cmd[:dirname] do
-        env =
-          {}
-          .merge(@context.resolve_env(wd: cmd[:dirname]))
-          .merge(get_environment_for_path(cmd[:dirname]))
+    def build_command_env(cmd)
+      env =
+        {}
+        .merge!(get_environment_for_path(cmd[:dirname]))
+        .merge!(@context.resolve_env(wd: cmd[:dirname]))
 
-        yield env, cmd
-      end
+      env
     end
 
-    def execute_command(cmd, command_args)
-      with_command_env(cmd) do |env, _cmd|
-        puts cmd[:command]
-        result = system env, cmd[:path], *command_args
-        result
-      end
+    def enqueue_command(cmd, command_args)
+      env = build_command_env(cmd)
+      # puts ">>> #{cmd[:command]}"
+      @job_runner.enqueue(env, cmd, command_args)
+    end
+
+    def run_queued_commands
+      @job_runner.run
     end
 
     def describe_command(cmd)
-      with_command_env(cmd) do |env, _cmd|
-        puts "Command #{cmd[:command]}",
-          "\tPATH: #{cmd[:path]}",
-          "\tENV:",
-          *(env.map do |(key, value)|
-            "\t\t#{key}=#{value}"
-          end)
-      end
+      env = build_command_env(cmd)
+      puts "Command #{cmd[:command]}",
+        "\tPATH: #{cmd[:path]}",
+        "\tENV:",
+        *(env.map do |(key, value)|
+          "\t\t#{key}=#{value}"
+        end)
     end
 
     def describe_commands(commands)
@@ -76,12 +81,28 @@ module Tachi
 
     def scan_for_commands
       Dir.chdir @context.root_path do
-        Dir.glob("**/cmd.*.sh")
+        Dir.glob("**/cmd.*").filter do |filename|
+          basename = File.basename(filename)
+          if File.file?(filename)
+            _,command = basename.split("cmd.")
+            extname = File.extname(command)
+            @context.allowed_extensions.include?(extname)
+          else
+            false
+          end
+        end
       end.map do |filename|
         basename = File.basename(filename, File.extname(filename))
 
         _,command = *basename.split("cmd.")
-        command = File.join(File.dirname(filename), command).gsub("/", ".")
+        dirname = File.dirname(filename)
+
+        command =
+          if dirname == "."
+            command
+          else
+            File.join(dirname, command)
+          end.gsub("/", ".")
 
         path = File.join(@context.root_path, filename)
 
@@ -91,46 +112,9 @@ module Tachi
           dirname: File.dirname(path),
           path: path,
         }
+      end.sort_by do |row|
+        row[:command]
       end
-    end
-
-    def match_command_segments?(given, expected)
-      i = 0
-      i2 = 0
-      i3 = 0
-      len = [given.size, expected.size].max
-
-      ok = true
-      while i3 < len
-        a = given[i]
-        b = expected[i2]
-
-        if a == b
-          i += 1
-          i2 += 1
-          i3 += 1
-        elsif b == "*"
-          while b == "*"
-            i2 += 1
-            b = expected[i2]
-          end
-
-          until a == b or i > given.size
-            i += 1
-            a = given[i]
-          end
-
-          if a != b
-            ok = false
-            break
-          end
-        else
-          ok = false
-          break
-        end
-      end
-
-      ok
     end
 
     def find_commands(command)
@@ -146,31 +130,26 @@ module Tachi
     def get_environment_for_path(path, acc = {})
       @env_cache ||= {}
 
-      if path == "/" or path == @context.root_path or path.empty?
+      if path.empty?
         return acc
       end
 
       if File.directory?(path)
         env_path = File.join(path, "environment")
         if File.file?(env_path)
-          result = {}
-          File.read(env_path).split("\n").each do |line|
-            key, value = line.split("=")
-            key = key.strip
-            value = value.strip
-            unless key.empty?
-              result[key] = value
-            end
-          end
-          @env_cache[path] = result
+          @env_cache[path] = Tachi::EnvironmentFile.read_file(env_path)
         end
       end
 
       if @env_cache[path]
-        acc.merge!(@env_cache[path])
+        acc = @env_cache[path].merge(acc)
       end
 
-      get_environment_for_path(File.dirname(path), acc)
+      parent = File.dirname(path)
+      if parent == "/" or path == @context.root_path
+        return acc
+      end
+      get_environment_for_path(parent, acc)
     end
 
     def load_config
@@ -189,12 +168,49 @@ module Tachi
     def process_argv(argv)
       parser = OptionParser.new do |opts|
         opts.banner = "Tachi v#{VERSION} the useful sidearm"
+
         opts.on '-c', '--config-file FILENAME', String, "The configuration file that should be pulled. (default. #{@config_filename})" do |value|
           @config_filename = value
         end
 
         opts.on '', '--context NAME', String, "The context to use. (default. #{@context})" do |value|
           @context_name = value
+        end
+
+        opts.on '-g', '--group PATH', String, "Grouping path" do |path|
+          @job_runner.setup_groups(split_command(path))
+        end
+
+        opts.on '-j', '--jobs COUNT', Integer, "How many threads should be used to execute jobs in parallel? (default: 1)" do |jobs|
+          if jobs <= 0
+            raise OptionParser::InvalidArgument, "--jobs must be a positive integer"
+          end
+          @job_runner.thread_limit = jobs
+        end
+
+        opts.on '', '--noop', "Toggle no-operation flag to skip running commands" do
+          @job_runner.noop = true
+        end
+
+        opts.on '', '--max-buffer-size SIZE', Integer, "Controls the job runner's maximum buffer size for IO before being force-flushed (default: #{@job_runner.max_buffer_size})" do |size|
+          if size <= 0
+            raise OptionParser::InvalidArgument, "--max-buffer-size must be a positive integer"
+          end
+
+          @job_runner.max_buffer_size = size
+        end
+
+        opts.on '', '--buffer-size SIZE', Integer, "Controls the job runner's buffer size for IO (default: #{@job_runner.buffer_size})" do |size|
+          if size <= 0
+            raise OptionParser::InvalidArgument, "--buffer-size must be a positive integer"
+          end
+
+          @job_runner.buffer_size = size
+        end
+
+        opts.on '-v', '--version', "Show" do
+          puts "Tachi #{VERSION}"
+          exit
         end
       end
       parser.parse(argv)
@@ -236,21 +252,32 @@ module Tachi
             show_help
             abort
           else
-            successful_commands = []
-            failed_commands = []
-
             cmds.each do |cmd|
-              result = execute_command(cmd, command_args)
-
-              if result
-                successful_commands << cmd
-              else
-                failed_commands << cmd
-              end
+              enqueue_command(cmd, command_args)
             end
 
             total_commands = cmds.size
+            result = run_queued_commands()
+
+            successful_commands = []
+            failed_commands = []
+
+            result.each do |command_result|
+              case command_result.exit_status
+              when 0
+                successful_commands << command_result
+              else
+                failed_commands << command_result
+              end
+            end
+
             puts "Completed #{successful_commands.size}/#{failed_commands.size}/#{total_commands}"
+            unless failed_commands.empty?
+              failed_commands.each do |command_result|
+                puts "\tFAILED #{command_result.cmd[:command]} exit-status=#{command_result.exit_status}"
+              end
+              exit 1
+            end
           end
 
         in ["version"]
@@ -260,45 +287,6 @@ module Tachi
           show_help
           abort
       end
-    end
-
-    # @args command [String]
-    # @returns Array<Array<String>>
-    def split_command(command)
-      result = []
-      segments = command.split(".")
-      segments.each do |segment|
-        case segment
-        when /\A\{(.+)\}\z/
-          sub_segments = $1.split(",")
-          if result.empty?
-            sub_segments.each do |sub_segment|
-              result.push([sub_segment])
-            end
-          else
-            old_result = result
-            result = []
-            old_result.each do |base_segments|
-              sub_segments.each do |sub_segment|
-                new_base_segments = base_segments.dup()
-                new_base_segments.push(sub_segment)
-                result.push(new_base_segments)
-              end
-            end
-          end
-        when String
-          if result.empty?
-            result.push([segment])
-          else
-            result.each do |base_segments|
-              base_segments.push(segment)
-            end
-          end
-        else
-          raise "unexpected command segment: #{segment.inspect}"
-        end
-      end
-      result
     end
   end
 end

@@ -1,4 +1,4 @@
-require 'yaml'
+require 'psych'
 
 module Tachi
   class ConfigError < RuntimeError
@@ -12,12 +12,16 @@ module Tachi
       attr_accessor :env
       # A set of environment variables that must be evaluated or calculated before use
       attr_accessor :calc_env
+      attr_accessor :allowed_extensions
 
       def initialize
         @name = nil
         @root_path = nil
         @env = {}
         @calc_env = {}
+        # All allowed file extensions that should be considered commands
+        # "" is a special case which means commands without an extension are allowed
+        @allowed_extensions = ["", ".sh", ".rb", ".py", ".pl"]
       end
 
       def resolve_env(wd:)
@@ -46,6 +50,17 @@ module Tachi
         unless @root_path
           fail "Context must have a root path"
         end
+
+        case @allowed_extensions
+        when nil
+          fail "Allowed extensions cannot be nil"
+        when Array
+          if @allowed_extensions.empty?
+            fail "must have at least 1 allowed extension"
+          end
+        else
+          fail "allowed_extensions must be an array"
+        end
       end
     end
 
@@ -56,7 +71,7 @@ module Tachi
       case filename
       when String
         if File.exist?(filename)
-          doc = YAML.load_file(filename)
+          doc = Psych.load_file(filename)
 
           new(doc)
         else
@@ -127,6 +142,8 @@ module Tachi
             context.env = value
           when "calc_env"
             context.calc_env = value
+          when "allowed_extensions"
+            context.allowed_extensions = value
           else
             raise ConfigError, "unexpected key in context object: #{key}"
           end
